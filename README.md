@@ -9,7 +9,7 @@ One round takes about three to five minutes. Meant as a micro-break.
 ## How to play
 
 1. Press **Start raking**. Study the holes while the rake does its first pass.
-2. Hold **Add sand**. A ghost mound grows at the hopper spot, drawn at the same scale and slope as the holes, so you can compare volumes by eye. Release to pour.
+2. Hold **Add sand**. Sand streams onto the hopper spot for as long as you hold and piles up as a cone with the same slope as the holes, so you can compare volumes by eye. If the bar passes under the spout it carries away what has landed and the pile regrows behind it. Several holds stack into one bigger pile; each hold counts as a pour. Steep edges settle in small slides now and then.
 3. Wait. The rake shaves what is above level, carries it in a heap and drops it into whatever is below level. Sand drifts slowly across radii, so far holes fill last.
 4. The round ends when every hole is level. If the heap in front of the rake vanishes while holes remain, you poured too little; add more, at a cost.
 
@@ -39,8 +39,8 @@ Sound is off by default; the toggle remembers your choice.
 - `?seed=123` reproduces a garden.
 - `?speed=20` runs the simulation 20× faster.
 - `?debug=1` shows deficit, added sand, remaining deficit, carried sand and a conservation check.
-- In the console, `__debug.pour(v)` pours `v` sand units, `__debug.sim.S.D` is the exact deficit.
+- In the console, `__debug.pour(v)` drops `v` sand units at once, `__debug.deposit(v)` streams them like a hold, `__debug.sim.S.D` is the exact deficit.
 
 ## Tuning
 
-The simulation between the `SIM BEGIN` and `SIM END` markers is DOM-free and can be extracted and run in Node to sweep constants. Key constants live in `CFG` at the top of the script.
+The simulation between the `SIM BEGIN` and `SIM END` markers is DOM-free and can be extracted and run in Node to sweep constants. Key constants live in `CFG` at the top of the script. `deposit(dV)` pours a small amount as the game does while holding; `pour(V)` drops a whole cone at once; `relaxAll(n)` runs the slide rule over the whole grid.
