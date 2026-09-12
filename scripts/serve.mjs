@@ -1,6 +1,6 @@
-// Tiny static server for local play. Sends no-cache headers so edits show up on plain reload.
+// Tiny static server for local play; serves the project root (one level up). Sends no-cache headers so edits show up on plain reload.
 import http from 'http'; import fs from 'fs'; import path from 'path';
-const root = path.dirname(new URL(import.meta.url).pathname), port = parseInt(process.argv[2] || '8791', 10);
+const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..'), port = parseInt(process.argv[2] || '8791', 10);
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.md': 'text/markdown; charset=utf-8', '.png': 'image/png' };
 http.createServer((req, res) => {
   let p = decodeURIComponent(new URL(req.url, 'http://x').pathname); if (p === '/') p = '/index.html';

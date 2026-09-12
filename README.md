@@ -29,7 +29,7 @@ A single pour that is up to about a quarter too generous still beats any two-pou
 Open `index.html` in a browser, or serve the folder (no-cache headers, so edits show on reload):
 
 ```bash
-node serve.mjs 8791
+node scripts/serve.mjs 8791
 ```
 
 Sound is off by default; the toggle remembers your choice.
