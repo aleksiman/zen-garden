@@ -173,14 +173,20 @@ function createSim(seed) {
     }
     return null;
   }
-  function addCone(x0, y0, r, depth, sign, arr, ungroom) {
-    let vol = 0;
-    const i0 = Math.max(0, Math.floor(x0 - r - 1)), i1 = Math.min(N - 1, Math.ceil(x0 + r + 1));
-    const j0 = Math.max(0, Math.floor(y0 - r - 1)), j1 = Math.min(N - 1, Math.ceil(y0 + r + 1));
+  // shape(angle) scales the radius around the outline so holes are not perfect circles
+  function makeShape() {
+    const a = [0.10 + rnd() * 0.08, 0.05 + rnd() * 0.07, 0.03 + rnd() * 0.04], ph = [rnd() * 6.283, rnd() * 6.283, rnd() * 6.283];
+    return ang => 1 + a[0] * Math.sin(ang + ph[0]) + a[1] * Math.sin(2 * ang + ph[1]) + a[2] * Math.sin(3 * ang + ph[2]);
+  }
+  function addCone(x0, y0, r, depth, sign, arr, ungroom, shape) {
+    let vol = 0; const rb = shape ? r * 1.35 : r;
+    const i0 = Math.max(0, Math.floor(x0 - rb - 1)), i1 = Math.min(N - 1, Math.ceil(x0 + rb + 1));
+    const j0 = Math.max(0, Math.floor(y0 - rb - 1)), j1 = Math.min(N - 1, Math.ceil(y0 + rb + 1));
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
       const idx = j * N + i; if (!mask[idx]) continue;
-      const d = Math.hypot(i + 0.5 - x0, j + 0.5 - y0); if (d >= r) continue;
-      const v = depth * (1 - smoothstep(0, r, d));
+      const dx = i + 0.5 - x0, dy = j + 0.5 - y0, d = Math.hypot(dx, dy);
+      const re = shape ? r * shape(Math.atan2(dy, dx)) : r; if (d >= re) continue;
+      const v = depth * (1 - smoothstep(0, re, d));
       arr[idx] += sign * v; vol += v;
       if (ungroom) groomed[idx] = 0;
     }
@@ -194,12 +200,12 @@ function createSim(seed) {
   const nh = 4 + Math.floor(rnd() * 4), weights = []; let ws = 0;
   for (let k = 0; k < nh; k++) { const w = 0.5 + rnd(); weights.push(w); ws += w; }
   const holes = [];
-  for (let k = 0; k < nh; k++) { const V = Dtarget * weights[k] / ws, r = coneRadiusForVolume(V); const p = place(r); if (p) holes.push({ x: p.x, y: p.y, V }); }
+  for (let k = 0; k < nh; k++) { const V = Dtarget * weights[k] / ws, r = coneRadiusForVolume(V); const p = place(r * 1.15); if (p) holes.push({ x: p.x, y: p.y, V, shape: makeShape() }); }
   const base = Float64Array.from(h);
   let scale = 1;
   for (let it = 0; it < 4; it++) {
     h.set(base);
-    for (const ho of holes) { const r = coneRadiusForVolume(ho.V * scale); ho.r = r; addCone(ho.x, ho.y, r, CFG.SLOPE * r, -1, h, false); }
+    for (const ho of holes) { const r = coneRadiusForVolume(ho.V * scale); ho.r = r; addCone(ho.x, ho.y, r, CFG.SLOPE * r, -1, h, false, ho.shape); }
     const d = deficit() - excessAbove();
     if (Math.abs(d - Dtarget) / Dtarget < 0.01) break;
     scale *= Math.min(1.4, Math.max(0.7, Dtarget / Math.max(1, d)));
@@ -258,7 +264,7 @@ function createSim(seed) {
   }
   function pour(V) {
     const r = coneRadiusForVolume(V);
-    const actual = addCone(hopper.x, hopper.y, r, CFG.SLOPE * r, +1, h, true);
+    const actual = addCone(hopper.x, hopper.y, r + 1, CFG.SLOPE * r, +1, h, true);
     S.added += actual; S.pours++; S.remaining = deficit();
     return actual;
   }
@@ -344,7 +350,7 @@ function renderHeight(sim, settleK) {
     const l = (i > 0 && mask[idx - 1]) ? disp[idx - 1] : c, r = (i < N - 1 && mask[idx + 1]) ? disp[idx + 1] : c;
     const u = (j > 0 && mask[idx - N]) ? disp[idx - N] : c, d = (j < N - 1 && mask[idx + N]) ? disp[idx + N] : c;
     let gx = (r - l) * 0.5, gy = (d - u) * 0.5;
-    if (groomed[idx]) { const rr = cellR[idx]; const rip = 0.012 * Math.sin(2 * Math.PI * rr / CFG.TOOTH); gx += rip * cellX[idx] / rr; gy += rip * cellY[idx] / rr; }
+    if (groomed[idx] && previewH[idx] <= 0.002) { const rr = cellR[idx]; const rip = 0.012 * Math.sin(2 * Math.PI * rr / CFG.TOOTH); gx += rip * cellX[idx] / rr; gy += rip * cellY[idx] / rr; }
     const nx = -gx * S, ny = -gy * S, inv = 1 / Math.sqrt(nx * nx + ny * ny + 1);
     const lam = Math.max(0, (nx * lx + ny * ly + lz) * inv);
     let shade = Math.min(1.12, 0.5 + 0.5 * lam / lz) * grain[idx];
@@ -397,10 +403,19 @@ function render(sim, opts) {
   ctx.fillStyle = '#2B2622';
   roundRect(ctx, -len, -bw / 2, len * 2, bw, bw / 2); ctx.fill();
   // teeth, then a translucent sand wash over their roots so they look dug in
+  // each tooth shows only its tip at level and its full length where it hangs over a hole
+  const ct = Math.cos(sim.S.theta), st = Math.sin(sim.S.theta), lyTip = bw / 2 + toothH * 0.6;
   ctx.fillStyle = '#2B2622'; ctx.beginPath();
-  for (let x = postPx + toothW; x < len - toothW; x += toothW) { ctx.moveTo(x - toothW * 0.45, bw / 2 - 1); ctx.lineTo(x, bw / 2 + toothH); ctx.lineTo(x + toothW * 0.45, bw / 2 - 1); }
+  for (let x = postPx + toothW; x < len - toothW; x += toothW) {
+    const X = x * ct - lyTip * st, Y = x * st + lyTip * ct;
+    const i = Math.floor(sim.cx + X / scale), j = Math.floor(sim.cy + Y / scale), idx = j * sim.N + i;
+    const hv = (i >= 0 && i < sim.N && j >= 0 && j < sim.N && sim.mask[idx]) ? sim.h[idx] : CFG.L;
+    const depth = Math.min(1, Math.max(0, (CFG.L - hv) / 0.35));
+    const tip = toothH * (0.42 + 0.58 * depth);
+    ctx.moveTo(x - toothW * 0.45, bw / 2 - 1); ctx.lineTo(x, bw / 2 + tip); ctx.lineTo(x + toothW * 0.45, bw / 2 - 1);
+  }
   ctx.closePath(); ctx.fill();
-  ctx.fillStyle = 'rgba(190,166,128,0.6)'; ctx.fillRect(postPx, bw / 2 - 0.5, len - postPx, toothH * 0.42);
+  ctx.fillStyle = 'rgba(190,166,128,0.6)'; ctx.fillRect(postPx, bw / 2 - 0.5, len - postPx, toothH * 0.18);
   ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.lineWidth = Math.max(1, W * 0.0015);
   ctx.beginPath(); ctx.moveTo(-len + bw / 2, -bw / 2 + ctx.lineWidth); ctx.lineTo(len - bw / 2, -bw / 2 + ctx.lineWidth); ctx.stroke();
   // post
