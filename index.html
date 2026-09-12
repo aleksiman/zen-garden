@@ -104,6 +104,7 @@ const CFG = {
   RIM_MARGIN: 0.08,
   GROOM_EPS: 0.01,
   END_FRAC: 0.005,
+  END_DEPTH: 0.015,  // no cell may be deeper than this below level: the last hole must really be filled by a pass
   TOOTH: 4,          // ripple spacing in cells
   SMOOTH: 0.15,      // how much each pass of the bar evens out the surface it crosses (conservative)
   BASE_ROLL: 1.2,    // cells of sand the bar always rolls ahead of itself (visual floor)
@@ -143,6 +144,7 @@ function createSim(seed) {
   order.sort((a, b) => cellAng[a] - cellAng[b]);
   const orderArr = Uint32Array.from(order), orderAng = Float64Array.from(order, i => cellAng[i]);
   const M = orderArr.length;
+  let maxBelow = 0; // deepest dip below level, refreshed by deficit()
 
   // --- terrain -----------------------------------------------------------
   function valueNoise(cells, amp) {
@@ -213,12 +215,12 @@ function createSim(seed) {
   // --- state -------------------------------------------------------------
   const carried = [new Float64Array(CFG.NBINS), new Float64Array(CFG.NBINS)];
   const tmp = new Float64Array(CFG.NBINS);
-  const S = { theta: 0, t: 0, added: 0, pours: 0, D: 0, initialTotal: 0, remaining: 0, flux: 0, rotations: 0, lastCheck: 0 };
+  const S = { theta: 0, t: 0, added: 0, pours: 0, D: 0, initialTotal: 0, remaining: 0, maxBelow: 0, flux: 0, rotations: 0, lastCheck: 0 };
   S.D = deficit() - excessAbove();
   S.remaining = deficit();
   S.initialTotal = total();
 
-  function deficit() { let d = 0; for (let k = 0; k < M; k++) { const v = L - h[orderArr[k]]; if (v > 0) d += v; } return d; }
+  function deficit() { let d = 0, mx = 0; for (let k = 0; k < M; k++) { const v = L - h[orderArr[k]]; if (v > 0) { d += v; if (v > mx) mx = v; } } maxBelow = mx; return d; }
   function excessAbove() { let d = 0; for (let k = 0; k < M; k++) { const v = h[orderArr[k]] - L; if (v > 0) d += v; } return d; }
   function total() { let s = 0; for (let k = 0; k < M; k++) s += h[orderArr[k]]; for (let b = 0; b < CFG.NBINS; b++) s += carried[0][b] + carried[1][b]; return s; }
   function carriedTotal() { let s = 0; for (let b = 0; b < CFG.NBINS; b++) s += carried[0][b] + carried[1][b]; return s; }
@@ -262,7 +264,7 @@ function createSim(seed) {
       diffuse(carried[0], k); diffuse(carried[1], k);
     }
     S.t += dt; S.rotations = S.theta / TWO; S.flux /= dt;
-    if (S.t - S.lastCheck >= 0.5) { S.lastCheck = S.t; S.remaining = deficit(); }
+    if (S.t - S.lastCheck >= 0.5) { S.lastCheck = S.t; S.remaining = deficit(); S.maxBelow = maxBelow; }
   }
   function pour(V) {
     const r = coneRadiusForVolume(V);
@@ -279,7 +281,7 @@ function createSim(seed) {
     addCone(hopper.x, hopper.y, r, CFG.SLOPE * r, +1, previewH, false);
     return r;
   }
-  function isComplete() { return S.remaining <= CFG.END_FRAC * S.D; }
+  function isComplete() { return S.remaining <= CFG.END_FRAC * S.D && maxBelow <= CFG.END_DEPTH; }
   function snap() { for (let k = 0; k < M; k++) h[orderArr[k]] = L; S.remaining = 0; } // leaves groomed untouched: the rake keeps drawing its tracks
 
   return { N, R, postR, cx, cy, h, previewH, mask, groomed, cellR, cellX, cellY, carried, S, hopper, holes, step, pour, setPreview, deficit, total, carriedTotal, isComplete, snap };
@@ -554,7 +556,7 @@ function update(dt) {
     if (sim.isComplete()) { state = 'settling'; settleT = 0; cancelHold(); el.addBtn.disabled = true; }
   } else if (state === 'settling') {
     settleT += dt;
-    if (settleT >= 1) { sim.snap(); state = 'complete'; el.addBtn.disabled = false; finish(); }
+    if (settleT >= 1.2) { sim.snap(); state = 'complete'; el.addBtn.disabled = false; finish(); } // snap moves nothing visible: max dip is below END_DEPTH
   }
   audio.setFlux(sim.S.flux, state === 'raking');
 }
@@ -563,7 +565,7 @@ function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2)
 function frame(ts) {
   const dt = lastTs ? Math.min(0.05, (ts - lastTs) / 1000) : 0; lastTs = ts;
   if (!paused && dt > 0) update(dt);
-  render(sim, { settleK: state === 'settling' ? easeInOut(Math.min(1, settleT)) : (state === 'complete' ? 1 : 0), previewR });
+  render(sim, { settleK: 0, previewR });
   if (DEBUG) {
     const S = sim.S, cons = sim.total() - S.initialTotal - S.added;
     el.debug.textContent = `seed ${seed}  speed ${SPEED}x  state ${state}\nD ${S.D.toFixed(1)}  added ${S.added.toFixed(1)}  e ${((S.added - S.D) / S.D).toFixed(3)}\nremaining ${S.remaining.toFixed(2)} (${(S.remaining / S.D * 100).toFixed(2)}%)  carried ${sim.carriedTotal().toFixed(2)}\nconservation ${cons.toExponential(2)}  rotations ${S.rotations.toFixed(2)}  t ${S.t.toFixed(1)}s\nhold ${hold.V.toFixed(0)}  flux ${S.flux.toFixed(2)}`;
