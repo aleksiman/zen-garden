@@ -1,6 +1,8 @@
 # Zen Garden
 
-A quiet browser game modelled on the automatic zen-garden desk gadget: a round tray of sand, a rake bar turning slowly around a center post. The garden starts uneven, with holes and not enough sand. Your only job is to judge how much sand is missing and add it, ideally in one pour, then wait for the rake to carry it into the holes.
+A relaxing sand-garden game: estimate how much sand the holes need and let the rake do the rest.
+
+Modelled on the automatic zen-garden desk gadget: a round tray of sand, a rake bar turning slowly around a center post. The garden starts uneven, with holes and not enough sand. Your job is to estimate how much sand is missing and add it, then wait for the rake to carry it into the holes. You can pour as many times as you like; a close estimate in few pours scores best.
 
 One round takes about three to five minutes. Meant as a micro-break.
 

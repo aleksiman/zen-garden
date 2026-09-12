@@ -519,7 +519,7 @@ function newGame(s) {
   clearTimeout(overlayTimer); overlayTimer = null;
   el.startBtn.hidden = false; el.newBtn.hidden = true; el.addBtn.hidden = true; el.status.hidden = true; el.overlay.hidden = true; el.overlay.classList.remove('show');
   el.addBtn.classList.remove('holding');
-  setSub('Start the rake and study the holes.', 'Then add just enough sand, in one pour.');
+  setSub('Start the rake and study the holes.', 'Then add as much sand as you think they need.');
   el.pours.textContent = '0'; el.time.textContent = '0:00'; setRing(0);
   if (DEBUG) { el.debug.hidden = false; history.replaceState(null, '', '?' + new URLSearchParams({ ...Object.fromEntries(params), seed }).toString()); }
 }
