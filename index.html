@@ -16,7 +16,7 @@ html,body{margin:0;min-height:100%}
 body{background:var(--linen);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;display:flex;justify-content:center}
 main{width:min(92vw,560px);padding:30px 0 56px;display:flex;flex-direction:column;align-items:center;gap:22px}
 header{text-align:center}
-h1{font-family:var(--serif);font-weight:400;font-size:30px;letter-spacing:.02em;margin:0 0 8px}
+h1{font-weight:700;font-size:19px;letter-spacing:.01em;margin:0 0 8px}
 .sub{margin:0 auto;color:var(--muted);font-size:14px;line-height:1.55;max-width:42ch;min-height:2.6em}
 .tray-wrap{position:relative;width:100%;aspect-ratio:1}
 canvas#garden{display:block;width:100%;height:100%;border-radius:50%;box-shadow:0 22px 46px -20px rgba(43,38,34,.5);touch-action:none;user-select:none;-webkit-user-select:none}
@@ -26,9 +26,9 @@ button:focus-visible{outline:2px solid var(--moss);outline-offset:3px}
 button[disabled]{opacity:.45;cursor:default}
 .primary{background:var(--tray);color:var(--paper);padding:14px 30px}
 .primary:hover{background:var(--tray-hi)}
-.hold{position:relative;background:var(--clay);color:var(--paper);width:136px;height:136px;border-radius:50%;padding:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:16px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;transition:background .6s,box-shadow 1.6s,transform .15s}
+.hold{position:relative;background:var(--tray);color:var(--paper);width:136px;height:136px;border-radius:50%;padding:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:16px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;transition:background .6s,box-shadow 1.6s,transform .15s}
 .hold small{font-size:11px;letter-spacing:.16em;text-transform:uppercase;opacity:.75}
-.hold.holding{background:var(--clay-dark);transform:scale(.97)}
+.hold.holding{background:var(--tray-hi);transform:scale(.97)}
 .hold svg{position:absolute;inset:-9px;width:calc(100% + 18px);height:calc(100% + 18px);transform:rotate(-90deg);pointer-events:none;overflow:visible}
 .hold svg circle{fill:none;stroke-width:3}
 .hold svg .track{stroke:rgba(43,38,34,.10)}
@@ -38,17 +38,22 @@ button[disabled]{opacity:.45;cursor:default}
 .row{display:flex;gap:14px;align-items:center;flex-wrap:wrap;justify-content:center}
 .ghost{background:transparent;color:var(--muted);padding:8px 12px;font-size:13px}
 .ghost:hover{color:var(--ink)}
-.card{background:var(--paper);border-radius:22px;padding:28px 28px 26px;width:100%;text-align:center;box-shadow:0 14px 34px -22px rgba(43,38,34,.4);transform:translateY(14px);opacity:0;transition:transform .7s cubic-bezier(.2,.7,.2,1),opacity .7s}
-.card.show{transform:none;opacity:1}
+.overlay{position:absolute;inset:0;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(241,234,224,.38);opacity:0;transition:opacity 1.1s ease}
+.overlay.show{opacity:1}
+.card{background:var(--paper);border-radius:22px;padding:26px 26px 24px;width:min(84%,380px);text-align:center;box-shadow:0 18px 44px -20px rgba(43,38,34,.45);transform:scale(.97);transition:transform 1.1s cubic-bezier(.2,.7,.2,1)}
+.overlay.show .card{transform:none}
+.card .row{margin-top:4px}
 .card .label{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
 .card .score{font-family:var(--serif);font-size:58px;line-height:1.05;margin:6px 0 10px}
 .card .stones{font-size:22px;letter-spacing:.32em;color:var(--moss);margin-bottom:14px}
 .card .stones .off{color:var(--line)}
 .card .verdict{font-family:var(--serif);font-style:italic;font-size:19px;margin:0 0 10px}
-.card .breakdown{color:var(--muted);font-size:14px;margin:0 0 20px}
+.card .breakdown{color:var(--muted);font-size:14px;margin:0 0 18px}
+.secondary{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--line)}
+.secondary:hover{background:rgba(43,38,34,.05)}
 .debug{position:fixed;left:8px;top:8px;font:11px/1.45 ui-monospace,Menlo,monospace;color:var(--muted);background:rgba(248,243,234,.92);padding:6px 9px;border-radius:8px;white-space:pre;pointer-events:none}
 [hidden]{display:none!important}
-@media (max-width:420px){h1{font-size:26px}.card .score{font-size:50px}}
+@media (max-width:420px){.card .score{font-size:50px}}
 </style>
 </head>
 <body>
@@ -59,22 +64,28 @@ button[disabled]{opacity:.45;cursor:default}
   </header>
   <div class="tray-wrap">
     <canvas id="garden" aria-label="Sand garden with a rotating rake"></canvas>
+    <div class="overlay" id="overlay" hidden role="dialog" aria-modal="true" aria-labelledby="score">
+      <div class="card" id="card">
+        <div class="label">Garden complete</div>
+        <div class="score" id="score">0</div>
+        <div class="stones" id="stones" aria-label="Rating"></div>
+        <p class="verdict" id="verdict"></p>
+        <p class="breakdown" id="breakdown"></p>
+        <div class="row">
+          <button class="secondary" id="admireBtn">Admire your work</button>
+          <button class="primary" id="againBtn">Start a new garden</button>
+        </div>
+      </div>
+    </div>
   </div>
   <section class="controls">
     <button class="primary" id="startBtn">Start raking</button>
+    <button class="primary" id="newBtn" hidden>Start a new garden</button>
     <button class="hold" id="addBtn" hidden aria-label="Add sand. Press and hold, release to pour.">
       <svg viewBox="0 0 100 100" aria-hidden="true"><circle class="track" cx="50" cy="50" r="48"/><circle class="fill" id="ring" cx="50" cy="50" r="48" stroke-dasharray="301.6" stroke-dashoffset="301.6"/></svg>
       <span>Add sand</span><small>hold</small>
     </button>
     <div class="status" id="status" hidden><span>Pours <b id="pours">0</b></span><span>Time <b id="time">0:00</b></span></div>
-    <div class="card" id="card" hidden>
-      <div class="label">Garden complete</div>
-      <div class="score" id="score">0</div>
-      <div class="stones" id="stones" aria-label="Rating"></div>
-      <p class="verdict" id="verdict"></p>
-      <p class="breakdown" id="breakdown"></p>
-      <button class="primary" id="againBtn">New garden</button>
-    </div>
     <div class="row">
       <button class="ghost" id="soundBtn" aria-pressed="false">Sound off</button>
     </div>
@@ -488,7 +499,7 @@ const audio = {
 
 // ==== Game ===============================================================
 const $ = id => document.getElementById(id);
-const el = { sub: $('sub'), startBtn: $('startBtn'), addBtn: $('addBtn'), ring: $('ring'), status: $('status'), pours: $('pours'), time: $('time'), card: $('card'), score: $('score'), stones: $('stones'), verdict: $('verdict'), breakdown: $('breakdown'), againBtn: $('againBtn'), soundBtn: $('soundBtn'), debug: $('debug') };
+const el = { sub: $('sub'), startBtn: $('startBtn'), newBtn: $('newBtn'), overlay: $('overlay'), admireBtn: $('admireBtn'), addBtn: $('addBtn'), ring: $('ring'), status: $('status'), pours: $('pours'), time: $('time'), card: $('card'), score: $('score'), stones: $('stones'), verdict: $('verdict'), breakdown: $('breakdown'), againBtn: $('againBtn'), soundBtn: $('soundBtn'), debug: $('debug') };
 const params = new URLSearchParams(location.search);
 const SPEED = Math.max(0.1, parseFloat(params.get('speed')) || 1);
 const DEBUG = params.get('debug') === '1';
@@ -496,12 +507,13 @@ const RING_LEN = 301.6;
 
 let sim, state = 'idle', seed = 0, elapsed = 0, paused = false, lastTs = 0;
 const hold = { active: false, V: 0, pointerId: null, kb: false };
-let settleT = 0, previewR = 0;
+let settleT = 0, previewR = 0, overlayTimer = null;
 
 function newGame(s) {
   seed = s >>> 0; sim = createSim(seed); state = 'idle'; elapsed = 0; settleT = 0; previewR = 0;
   hold.active = false; hold.V = 0; sim.setPreview(0);
-  el.startBtn.hidden = false; el.addBtn.hidden = true; el.status.hidden = true; el.card.hidden = true; el.card.classList.remove('show');
+  clearTimeout(overlayTimer); overlayTimer = null;
+  el.startBtn.hidden = false; el.newBtn.hidden = true; el.addBtn.hidden = true; el.status.hidden = true; el.overlay.hidden = true; el.overlay.classList.remove('show');
   el.addBtn.classList.remove('holding');
   el.sub.textContent = 'Start the rake. Then add exactly as much sand as the holes need, in one pour.';
   el.pours.textContent = '0'; el.time.textContent = '0:00'; setRing(0);
@@ -542,9 +554,16 @@ function finish() {
   const p = sim.S.pours; el.breakdown.textContent = `${p} pour${p === 1 ? '' : 's'} · ${excessWords(res.e)} · ${fmtTime(elapsed)}`;
   el.addBtn.hidden = true; el.status.hidden = true;
   el.sub.textContent = 'Every hole is level. The rake keeps turning.';
-  el.card.hidden = false; requestAnimationFrame(() => el.card.classList.add('show'));
   audio.chime();
-  el.againBtn.focus({ preventScroll: true });
+  overlayTimer = setTimeout(showOverlay, 2000);
+}
+function showOverlay() {
+  overlayTimer = null; el.overlay.hidden = false;
+  requestAnimationFrame(() => { el.overlay.classList.add('show'); el.admireBtn.focus({ preventScroll: true }); });
+}
+function hideOverlay() {
+  el.overlay.classList.remove('show');
+  setTimeout(() => { if (state === 'complete') { el.overlay.hidden = true; el.newBtn.hidden = false; el.newBtn.focus({ preventScroll: true }); } }, 1100);
 }
 
 function update(dt) {
@@ -576,6 +595,8 @@ function frame(ts) {
 // --- input -------------------------------------------------------------
 el.startBtn.addEventListener('click', () => { audio.ensure(); startGame(); });
 el.againBtn.addEventListener('click', () => newGame((Math.random() * 2 ** 32) >>> 0));
+el.newBtn.addEventListener('click', () => newGame((Math.random() * 2 ** 32) >>> 0));
+el.admireBtn.addEventListener('click', hideOverlay);
 el.soundBtn.addEventListener('click', () => { const on = !audio.enabled; audio.setEnabled(on); el.soundBtn.textContent = on ? 'Sound on' : 'Sound off'; el.soundBtn.setAttribute('aria-pressed', String(on)); try { localStorage.setItem('zen-garden-sound', on ? '1' : '0'); } catch (e) {} });
 el.addBtn.addEventListener('pointerdown', e => { if (e.button !== 0 && e.pointerType === 'mouse') return; e.preventDefault(); try { el.addBtn.setPointerCapture(e.pointerId); } catch (err) {} beginHold(e.pointerId, false); });
 el.addBtn.addEventListener('pointerup', e => { if (hold.active && !hold.kb && hold.pointerId === e.pointerId) releaseHold(); });
