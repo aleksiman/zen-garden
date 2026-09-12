@@ -49,7 +49,6 @@ button[disabled]{opacity:.45;cursor:default}
 .card .stones .off{color:var(--line)}
 .card .verdict{font-family:var(--serif);font-style:italic;font-size:19px;margin:0 0 10px}
 .card .breakdown{color:var(--muted);font-size:14px;margin:0 0 20px}
-.best{color:var(--muted);font-size:13px;margin:0}
 .debug{position:fixed;left:8px;top:8px;font:11px/1.45 ui-monospace,Menlo,monospace;color:var(--muted);background:rgba(248,243,234,.92);padding:6px 9px;border-radius:8px;white-space:pre;pointer-events:none}
 [hidden]{display:none!important}
 @media (max-width:420px){h1{font-size:26px}.card .score{font-size:50px}}
@@ -82,7 +81,6 @@ button[disabled]{opacity:.45;cursor:default}
     </div>
     <div class="row">
       <button class="ghost" id="soundBtn" aria-pressed="false">Sound off</button>
-      <p class="best" id="best"></p>
     </div>
   </section>
 </main>
@@ -455,7 +453,7 @@ const audio = {
 
 // ==== Game ===============================================================
 const $ = id => document.getElementById(id);
-const el = { sub: $('sub'), cue: $('cue'), startBtn: $('startBtn'), addBtn: $('addBtn'), ring: $('ring'), status: $('status'), pours: $('pours'), time: $('time'), card: $('card'), score: $('score'), stones: $('stones'), verdict: $('verdict'), breakdown: $('breakdown'), againBtn: $('againBtn'), soundBtn: $('soundBtn'), best: $('best'), debug: $('debug') };
+const el = { sub: $('sub'), cue: $('cue'), startBtn: $('startBtn'), addBtn: $('addBtn'), ring: $('ring'), status: $('status'), pours: $('pours'), time: $('time'), card: $('card'), score: $('score'), stones: $('stones'), verdict: $('verdict'), breakdown: $('breakdown'), againBtn: $('againBtn'), soundBtn: $('soundBtn'), debug: $('debug') };
 const params = new URLSearchParams(location.search);
 const SPEED = Math.max(0.1, parseFloat(params.get('speed')) || 1);
 const DEBUG = params.get('debug') === '1';
@@ -472,7 +470,6 @@ function newGame(s) {
   el.addBtn.classList.remove('glow', 'holding'); el.cue.classList.remove('show');
   el.sub.textContent = 'Start the rake. Then add exactly as much sand as the holes need, in one pour.';
   el.pours.textContent = '0'; el.time.textContent = '0:00'; setRing(0);
-  showBest();
   if (DEBUG) { el.debug.hidden = false; history.replaceState(null, '', '?' + new URLSearchParams({ ...Object.fromEntries(params), seed }).toString()); }
 }
 function startGame() {
@@ -481,8 +478,6 @@ function startGame() {
   el.sub.textContent = 'Hold Add sand to shape a pour, release to drop it. The rake carries it into the holes.';
   el.addBtn.focus({ preventScroll: true });
 }
-function showBest() { let b = null; try { b = localStorage.getItem('zen-garden-best'); } catch (e) {} el.best.textContent = b ? 'Best ' + b : ''; }
-function saveBest(score) { try { const b = parseInt(localStorage.getItem('zen-garden-best') || '0', 10); if (score > b) localStorage.setItem('zen-garden-best', String(score)); } catch (e) {} }
 function setRing(frac) { el.ring.setAttribute('stroke-dashoffset', (RING_LEN * (1 - Math.min(1, Math.max(0, frac)))).toFixed(1)); }
 function fmtTime(s) { s = Math.floor(s); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
 
@@ -513,7 +508,7 @@ function finish() {
   el.addBtn.hidden = true; el.status.hidden = true; el.cue.classList.remove('show');
   el.sub.textContent = 'Every hole is level. The rake keeps turning.';
   el.card.hidden = false; requestAnimationFrame(() => el.card.classList.add('show'));
-  saveBest(res.score); showBest(); audio.chime();
+  audio.chime();
   el.againBtn.focus({ preventScroll: true });
 }
 
