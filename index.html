@@ -189,11 +189,11 @@ function createSim(seed) {
   }
   // shape(angle) scales the radius around the outline so holes are not perfect circles
   function makeShape() {
-    const a = [0.10 + rnd() * 0.08, 0.05 + rnd() * 0.07, 0.03 + rnd() * 0.04], ph = [rnd() * 6.283, rnd() * 6.283, rnd() * 6.283];
-    return ang => 1 + a[0] * Math.sin(ang + ph[0]) + a[1] * Math.sin(2 * ang + ph[1]) + a[2] * Math.sin(3 * ang + ph[2]);
+    const a = [0.18 + rnd() * 0.12, 0.10 + rnd() * 0.10, 0.06 + rnd() * 0.06, 0.03 + rnd() * 0.05], ph = [rnd() * 6.283, rnd() * 6.283, rnd() * 6.283, rnd() * 6.283];
+    return ang => 1 + a[0] * Math.sin(ang + ph[0]) + a[1] * Math.sin(2 * ang + ph[1]) + a[2] * Math.sin(3 * ang + ph[2]) + a[3] * Math.sin(5 * ang + ph[3]);
   }
   function addCone(x0, y0, r, depth, sign, arr, ungroom, shape) {
-    let vol = 0; const rb = shape ? r * 1.35 : r;
+    let vol = 0; const rb = shape ? r * 1.75 : r;
     const i0 = Math.max(0, Math.floor(x0 - rb - 1)), i1 = Math.min(N - 1, Math.ceil(x0 + rb + 1));
     const j0 = Math.max(0, Math.floor(y0 - rb - 1)), j1 = Math.min(N - 1, Math.ceil(y0 + rb + 1));
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
@@ -215,7 +215,7 @@ function createSim(seed) {
   const nh = 4 + Math.floor(rnd() * 4), weights = []; let ws = 0;
   for (let k = 0; k < nh; k++) { const w = 0.5 + rnd(); weights.push(w); ws += w; }
   const holes = [];
-  for (let k = 0; k < nh; k++) { const V = Dtarget * weights[k] / ws, r = coneRadiusForVolume(V); const p = place(r * 1.15); if (p) holes.push({ x: p.x, y: p.y, V, shape: makeShape() }); }
+  for (let k = 0; k < nh; k++) { const V = Dtarget * weights[k] / ws, r = coneRadiusForVolume(V); const p = place(r * 1.2); if (p) holes.push({ x: p.x, y: p.y, V, shape: makeShape() }); }
   const base = Float64Array.from(h);
   let scale = 1;
   for (let it = 0; it < 4; it++) {
