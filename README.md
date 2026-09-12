@@ -24,10 +24,10 @@ A single pour that is up to about a quarter too generous still beats any two-pou
 
 ## Running
 
-Open `index.html` in a browser, or serve the folder:
+Open `index.html` in a browser, or serve the folder (no-cache headers, so edits show on reload):
 
 ```bash
-python3 -m http.server 8765
+node serve.mjs 8791
 ```
 
 Sound is off by default; the toggle remembers your choice.
