@@ -44,3 +44,7 @@ Sound is off by default; the toggle remembers your choice.
 ## Tuning
 
 The simulation between the `SIM BEGIN` and `SIM END` markers is DOM-free and can be extracted and run in Node to sweep constants. Key constants live in `CFG` at the top of the script. `deposit(dV)` pours a small amount as the game does while holding; `pour(V)` drops a whole cone at once; `relaxAll(n)` runs the slide rule over the whole grid.
+
+## Credits
+
+Background photo by [FWStudio](https://www.pexels.com/@fwstudio-33348) on Pexels.
