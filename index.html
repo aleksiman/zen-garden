@@ -702,7 +702,7 @@ new ResizeObserver(resize).observe(canvas); resize();
 newGame(params.has('seed') ? parseInt(params.get('seed'), 10) >>> 0 : (Math.random() * 2 ** 32) >>> 0);
 try { if (localStorage.getItem('zen-garden-sound') === '1') { el.soundBtn.textContent = 'Sound on'; el.soundBtn.setAttribute('aria-pressed', 'true'); audio.enabled = true; } } catch (e) {}
 requestAnimationFrame(frame);
-window.__debug = { get sim() { return sim; }, get state() { return state; }, start: startGame, pour: v => sim.pour(v), scoreFor, newGame, CFG, render: () => render(sim, { settleK: 0 }), tick: dt => update(dt), deposit: v => sim.deposit(v), relaxAll: n => sim.relaxAll(n || 10), HOLD_RATE, HOLD_CAP };
+window.__debug = { get sim() { return sim; }, get state() { return state; }, start: startGame, pour: v => sim.pour(v), scoreFor, newGame, CFG, render: () => render(sim, { settleK: 0 }), tick: dt => update(dt), deposit: v => sim.deposit(v), relaxAll: n => sim.relaxAll(n || 10), HOLD_RATE, HOLD_CAP, audio };
 </script>
 </body>
 </html>
