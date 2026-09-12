@@ -122,6 +122,14 @@ const CFG = {
   TOOTH: 4,          // ripple spacing in cells
   SMOOTH: 0.1575,    // how much each pass of the bar evens out the surface it crosses (conservative)
   BASE_ROLL: 1.2,    // cells of sand the bar always rolls ahead of itself (visual floor)
+  BAR_HALF: 0.0289,  // half width of the bar as a fraction of R (shared by sim and renderer)
+  PILE_EPS: 0.05,    // height above level that counts as pile when measuring the poured cone
+  S_CRIT: 0.06,      // angle of repose for slides: 2 x SLOPE, above the ideal cone's steepest face (1.5 x SLOPE)
+  RELAX_K: 0.5,      // fraction of the excess slope moved per relaxation pass
+  SLIDE_R: 8,        // radius (cells) of one slide
+  SLIDE_FRAMES: 8,   // frames one slide lasts
+  CAP_FRAC: 0.08,    // share of poured sand that lands as a steep cap at the spout (the rest fills the cone)
+  CAP_SIGMA: 3,      // cells; width of that cap
 };
 const HOLD_RATE = CFG.D_REF / CFG.HOLD_MID_S;
 const HOLD_CAP = HOLD_RATE * CFG.HOLD_CAP_S;
@@ -141,7 +149,7 @@ function coneRadiusForVolume(V, slope = CFG.SLOPE) { return Math.cbrt(Math.max(0
 function createSim(seed) {
   const N = CFG.N, L = CFG.L, rnd = mulberry32(seed);
   const cx = N / 2, cy = N / 2, R = N / 2 - 2, postR = CFG.POST_FRAC * R;
-  const h = new Float64Array(N * N), previewH = new Float64Array(N * N);
+  const h = new Float64Array(N * N);
   const mask = new Uint8Array(N * N), groomed = new Uint8Array(N * N), binOf = new Uint8Array(N * N);
   const cellR = new Float32Array(N * N), cellX = new Float32Array(N * N), cellY = new Float32Array(N * N), cellAng = new Float32Array(N * N);
   const order = [];
@@ -229,7 +237,7 @@ function createSim(seed) {
   // --- state -------------------------------------------------------------
   const carried = [new Float64Array(CFG.NBINS), new Float64Array(CFG.NBINS)];
   const tmp = new Float64Array(CFG.NBINS);
-  const S = { theta: 0, t: 0, added: 0, pours: 0, D: 0, initialTotal: 0, remaining: 0, maxBelow: 0, flux: 0, rotations: 0, lastCheck: 0 };
+  const S = { theta: 0, t: 0, added: 0, pours: 0, D: 0, initialTotal: 0, remaining: 0, maxBelow: 0, flux: 0, rotations: 0, lastCheck: 0, slides: 0 };
   S.D = deficit() - excessAbove();
   S.remaining = deficit();
   S.initialTotal = total();
@@ -279,27 +287,102 @@ function createSim(seed) {
       diffuse(carried[0], k); diffuse(carried[1], k);
     }
     S.t += dt; S.rotations = S.theta / TWO; S.flux /= dt;
+    relax(dt);
     if (S.t - S.lastCheck >= 0.5) { S.lastCheck = S.t; S.remaining = deficit(); S.maxBelow = maxBelow; }
   }
+  // one-shot cone (debug/harness); the game pours continuously through deposit()
   function pour(V) {
     const r = coneRadiusForVolume(V);
     const actual = addCone(hopper.x, hopper.y, r, CFG.SLOPE * r, +1, h, true);
-    S.added += actual; S.pours++; S.remaining = deficit();
+    S.added += actual; S.remaining = deficit();
     return actual;
   }
-  let pb = null;
-  function setPreview(V) {
-    if (pb) { for (let j = pb.j0; j <= pb.j1; j++) for (let i = pb.i0; i <= pb.i1; i++) previewH[j * N + i] = 0; pb = null; }
-    if (V <= 0) return 0;
-    const r = coneRadiusForVolume(V);
-    pb = { i0: Math.max(0, Math.floor(hopper.x - r - 1)), i1: Math.min(N - 1, Math.ceil(hopper.x + r + 1)), j0: Math.max(0, Math.floor(hopper.y - r - 1)), j1: Math.min(N - 1, Math.ceil(hopper.y + r + 1)) };
-    addCone(hopper.x, hopper.y, r, CFG.SLOPE * r, +1, previewH, false);
-    return r;
+  function countPour() { S.pours++; }
+
+  // --- continuous pouring -------------------------------------------------
+  // Sand lands while the button is held. The pile in the hopper box is measured and grown as the
+  // next shell of the ideal cone, so a stack of holds is one cone and a cut pile regrows from what is left.
+  const hopBox = (() => { const rb = Math.ceil(coneRadiusForVolume(3 * HOLD_CAP)) + 3; return { i0: Math.max(0, Math.floor(hopper.x - rb)), i1: Math.min(N - 1, Math.ceil(hopper.x + rb)), j0: Math.max(0, Math.floor(hopper.y - rb)), j1: Math.min(N - 1, Math.ceil(hopper.y + rb)) }; })();
+  function prof(r, d) { return d >= r ? 0 : CFG.SLOPE * r * (1 - smoothstep(0, r, d)); }
+  function inBarZone(idx, ct, st, band) { const ly = -cellX[idx] * st + cellY[idx] * ct; return ly <= band && ly >= -band; }
+  function deposit(dV) {
+    if (dV <= 0) return 0;
+    const ct = Math.cos(S.theta), st = Math.sin(S.theta), band = CFG.BAR_HALF * R;
+    let Vloc = 0;
+    for (let j = hopBox.j0; j <= hopBox.j1; j++) for (let i = hopBox.i0; i <= hopBox.i1; i++) { const idx = j * N + i; if (mask[idx] && h[idx] > L + CFG.PILE_EPS) Vloc += h[idx] - L; }
+    let landed = 0, dMain = dV;
+    // a small share lands as a steep cap right under the spout; slides carry it down the flank
+    {
+      const dCap = dV * CFG.CAP_FRAC, sig = CFG.CAP_SIGMA, rr = sig * 2.7, k2 = 1 / (2 * sig * sig);
+      const i0 = Math.max(0, Math.floor(hopper.x - rr)), i1 = Math.min(N - 1, Math.ceil(hopper.x + rr)), j0 = Math.max(0, Math.floor(hopper.y - rr)), j1 = Math.min(N - 1, Math.ceil(hopper.y + rr));
+      let wsum = 0;
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const idx = j * N + i; if (!mask[idx] || inBarZone(idx, ct, st, band)) continue; const dx = i + 0.5 - hopper.x, dy = j + 0.5 - hopper.y; if (dx * dx + dy * dy > rr * rr) continue; wsum += Math.exp(-(dx * dx + dy * dy) * k2); }
+      if (wsum > 0) {
+        for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const idx = j * N + i; if (!mask[idx] || inBarZone(idx, ct, st, band)) continue; const dx = i + 0.5 - hopper.x, dy = j + 0.5 - hopper.y; if (dx * dx + dy * dy > rr * rr) continue; const inc = dCap * Math.exp(-(dx * dx + dy * dy) * k2) / wsum; h[idx] += inc; landed += inc; }
+        dMain -= dCap;
+      }
+    }
+    // the rest fills the pile toward the ideal cone of (measured pile + increment): trenches and cut halves fill first
+    let r1 = Math.max(3, coneRadiusForVolume(Vloc + dMain));
+    for (let tries = 0; tries < 6; tries++) {
+      const i0 = Math.max(0, Math.floor(hopper.x - r1 - 1)), i1 = Math.min(N - 1, Math.ceil(hopper.x + r1 + 1)), j0 = Math.max(0, Math.floor(hopper.y - r1 - 1)), j1 = Math.min(N - 1, Math.ceil(hopper.y + r1 + 1));
+      let T = 0;
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const idx = j * N + i; if (!mask[idx] || inBarZone(idx, ct, st, band)) continue; const d = Math.hypot(i + 0.5 - hopper.x, j + 0.5 - hopper.y); if (d >= r1) continue; const def = prof(r1, d) - (h[idx] > L ? h[idx] - L : 0); if (def > 0) T += def; }
+      if (T >= dMain || tries === 5) {
+        if (T > 0) { const f = dMain / T; for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const idx = j * N + i; if (!mask[idx] || inBarZone(idx, ct, st, band)) continue; const d = Math.hypot(i + 0.5 - hopper.x, j + 0.5 - hopper.y); if (d >= r1) continue; const def = prof(r1, d) - (h[idx] > L ? h[idx] - L : 0); if (def > 0) { const inc = def * f; h[idx] += inc; landed += inc; } } }
+        break;
+      }
+      r1 += 1.5;
+    }
+    S.added += landed;
+    return landed;
   }
+
+  // --- angle-of-repose slides ------------------------------------------------
+  // Only cells above level shed sand, so holes (all at or below level) can never slump. The bar's
+  // footprint is a wall: nothing moves into or out of it, so a cut face stays with the bar.
+  const rnd2 = mulberry32((seed ^ 0x9E3779B9) >>> 0);
+  const steep = new Uint32Array(4096); let steepN = 0, scanTick = 0, slideFrames = 0, slideGap = 0.8 + rnd2(), epi = -1, lastMaxDiff = 0;
+  function relaxPair(c, n, ct, st, band) {
+    if (!mask[n] || inBarZone(n, ct, st, band)) return;
+    const diff = h[c] - h[n];
+    if (diff > CFG.S_CRIT) { const f = CFG.RELAX_K * (diff - CFG.S_CRIT) / 2; h[c] -= f; h[n] += f; }
+  }
+  function scanSteep(ct, st, band) {
+    steepN = 0; let mx = 0;
+    for (let j = hopBox.j0; j <= hopBox.j1; j++) for (let i = hopBox.i0; i <= hopBox.i1; i++) {
+      const idx = j * N + i; if (!mask[idx]) continue; const hv = h[idx]; if (hv <= L + 1e-9 || inBarZone(idx, ct, st, band)) continue;
+      let d = 0;
+      if (mask[idx + 1] && hv - h[idx + 1] > d) d = hv - h[idx + 1];
+      if (mask[idx - 1] && hv - h[idx - 1] > d) d = hv - h[idx - 1];
+      if (mask[idx + N] && hv - h[idx + N] > d) d = hv - h[idx + N];
+      if (mask[idx - N] && hv - h[idx - N] > d) d = hv - h[idx - N];
+      if (d > CFG.S_CRIT) { if (steepN < steep.length) steep[steepN++] = idx; if (d > mx) mx = d; }
+    }
+    lastMaxDiff = mx;
+  }
+  function relax(dt) {
+    const ct = Math.cos(S.theta), st = Math.sin(S.theta), band = CFG.BAR_HALF * R + 1;
+    if (slideFrames <= 0) {
+      if (++scanTick % 3 === 0) scanSteep(ct, st, band);
+      slideGap -= dt;
+      if (steepN > 0 && (slideGap <= 0 || lastMaxDiff > 3 * CFG.SLOPE)) { epi = steep[Math.floor(rnd2() * steepN)]; slideFrames = CFG.SLIDE_FRAMES; slideGap = 0.6 + 1.2 * rnd2(); S.slides++; }
+      else return;
+    }
+    const ex = epi % N, ey = (epi - ex) / N, r = CFG.SLIDE_R;
+    for (let it = 0; it < 3; it++) for (let j = Math.max(1, ey - r); j <= Math.min(N - 2, ey + r); j++) for (let i = Math.max(1, ex - r); i <= Math.min(N - 2, ex + r); i++) {
+      if ((i - ex) * (i - ex) + (j - ey) * (j - ey) > r * r) continue;
+      const idx = j * N + i; if (!mask[idx] || h[idx] <= L + 1e-9 || inBarZone(idx, ct, st, band)) continue;
+      relaxPair(idx, idx + 1, ct, st, band); relaxPair(idx, idx - 1, ct, st, band); relaxPair(idx, idx + N, ct, st, band); relaxPair(idx, idx - N, ct, st, band);
+    }
+    slideFrames--;
+  }
+  // full-grid relaxation without the bar wall, for tests only
+  function relaxAll(iters) { for (let it = 0; it < iters; it++) for (let k = 0; k < M; k++) { const idx = orderArr[k]; if (h[idx] <= L + 1e-9) continue; relaxPair(idx, idx + 1, 1, 0, -1); relaxPair(idx, idx - 1, 1, 0, -1); relaxPair(idx, idx + N, 1, 0, -1); relaxPair(idx, idx - N, 1, 0, -1); } }
   function isComplete() { return S.remaining <= CFG.END_FRAC * S.D && maxBelow <= CFG.END_DEPTH; }
   function snap() { for (let k = 0; k < M; k++) h[orderArr[k]] = L; S.remaining = 0; } // leaves groomed untouched: the rake keeps drawing its tracks
 
-  return { N, R, postR, cx, cy, h, previewH, mask, groomed, cellR, cellX, cellY, carried, S, hopper, holes, step, pour, setPreview, deficit, total, carriedTotal, isComplete, snap };
+  return { N, R, postR, cx, cy, h, mask, groomed, cellR, cellX, cellY, carried, S, hopper, holes, hopBox, step, pour, countPour, deposit, relaxAll, deficit, total, carriedTotal, isComplete, snap };
 }
 
 function scoreFor(pours, added, D) {
@@ -333,13 +416,13 @@ const img = octx.createImageData(CFG.N, CFG.N), px = img.data;
 const disp = new Float32Array(CFG.N * CFG.N);
 const heapW = [new Float32Array(CFG.NBINS), new Float32Array(CFG.NBINS)];
 const grain = new Float32Array(CFG.N * CFG.N); { const g = mulberry32(7); for (let k = 0; k < grain.length; k++) grain[k] = 0.965 + g() * 0.07; }
-const SAND = [0xF3, 0xF2, 0xEF], WET = [0xB9, 0xB5, 0xAE], GHOST = [0xDC, 0xDA, 0xD5]; // near-white sand, grey in the depths
+const SAND = [0xF3, 0xF2, 0xEF], WET = [0xB9, 0xB5, 0xAE]; // near-white sand, grey in the depths
 const LX = -0.55, LY = -0.7, LZ = 0.55, LN = Math.hypot(LX, LY, LZ), lx = LX / LN, ly = LY / LN, lz = LZ / LN;
 
 function renderHeight(sim, settleK) {
-  const { N, h, previewH, mask, groomed, cellR, cellX, cellY } = sim, L = CFG.L, S = 22;
+  const { N, h, mask, groomed, cellR, cellX, cellY } = sim, L = CFG.L, S = 22;
   // carried sand as one smooth ridge ahead of each bar half, sharing the surface's grain and lighting
-  const th = sim.S.theta, ct = Math.cos(th), st = Math.sin(th), barHalf = 0.0289 * sim.R, nb = CFG.NBINS, binW = (sim.R - sim.postR) / nb;
+  const th = sim.S.theta, ct = Math.cos(th), st = Math.sin(th), barHalf = CFG.BAR_HALF * sim.R, nb = CFG.NBINS, binW = (sim.R - sim.postR) / nb;
   for (let half = 0; half < 2; half++) {
     const hw = heapW[half];
     for (let b = 0; b < nb; b++) hw[b] = Math.max(CFG.BASE_ROLL, Math.min(14, 1.7 * Math.sqrt(sim.carried[half][b])));
@@ -351,7 +434,7 @@ function renderHeight(sim, settleK) {
   }
   for (let k = 0; k < N * N; k++) {
     if (!mask[k]) { disp[k] = L; continue; }
-    let v = h[k] + (L - h[k]) * settleK + previewH[k];
+    let v = h[k] + (L - h[k]) * settleK;
     const x = cellX[k], y = cellY[k], lx = x * ct + y * st, ly = -x * st + y * ct;
     const half = lx >= 0 ? 0 : 1, lead = half === 0 ? ly : -ly;
     if (lead > 0) {
@@ -369,7 +452,8 @@ function renderHeight(sim, settleK) {
     const l = (i > 0 && mask[idx - 1]) ? disp[idx - 1] : c, r = (i < N - 1 && mask[idx + 1]) ? disp[idx + 1] : c;
     const u = (j > 0 && mask[idx - N]) ? disp[idx - N] : c, d = (j < N - 1 && mask[idx + N]) ? disp[idx + N] : c;
     let gx = (r - l) * 0.5, gy = (d - u) * 0.5;
-    if (groomed[idx] && previewH[idx] <= 0.002) { const rr = cellR[idx]; const rip = 0.012 * Math.sin(2 * Math.PI * rr / CFG.TOOTH); gx += rip * cellX[idx] / rr; gy += rip * cellY[idx] / rr; }
+    // ripples only where raked and at level: a pile above level shows no tracks
+    if (groomed[idx] && h[idx] <= L + CFG.GROOM_EPS) { const rr = cellR[idx]; const rip = 0.012 * Math.sin(2 * Math.PI * rr / CFG.TOOTH); gx += rip * cellX[idx] / rr; gy += rip * cellY[idx] / rr; }
     const nx = -gx * S, ny = -gy * S, inv = 1 / Math.sqrt(nx * nx + ny * ny + 1);
     const lam = Math.max(0, (nx * lx + ny * ly + lz) * inv);
     let shade = Math.min(1.12, 0.5 + 0.5 * lam / lz) * grain[idx];
@@ -377,7 +461,6 @@ function renderHeight(sim, settleK) {
     const depth = Math.min(1, Math.max(0, below / 0.6));
     if (below > 0.02) { const f = (below / 0.1) % 1; if (f < 0.10) shade *= 0.9; }
     let cr = SAND[0] + (WET[0] - SAND[0]) * depth, cg = SAND[1] + (WET[1] - SAND[1]) * depth, cb = SAND[2] + (WET[2] - SAND[2]) * depth;
-    if (previewH[idx] > 0.002) { cr = cr * 0.55 + GHOST[0] * 0.45; cg = cg * 0.55 + GHOST[1] * 0.45; cb = cb * 0.55 + GHOST[2] * 0.45; }
     px[o] = cr * shade; px[o + 1] = cg * shade; px[o + 2] = cb * shade; px[o + 3] = 255;
   }
   octx.putImageData(img, 0, 0);
@@ -405,12 +488,6 @@ function render(sim, opts) {
   // hopper spout mark
   const hx = C + Math.cos(CFG.HOPPER_ANG) * (C + Ri) / 2, hy = C + Math.sin(CFG.HOPPER_ANG) * (C + Ri) / 2;
   ctx.fillStyle = '#A8654A'; ctx.beginPath(); ctx.arc(hx, hy, W * 0.012, 0, 2 * Math.PI); ctx.fill();
-  // preview outline
-  if (opts.previewR > 0) {
-    const pxh = C + (sim.hopper.x - sim.cx) * scale, pyh = C + (sim.hopper.y - sim.cy) * scale;
-    ctx.setLineDash([W * 0.008, W * 0.008]); ctx.strokeStyle = 'rgba(43,38,34,0.38)'; ctx.lineWidth = Math.max(1, W * 0.0025);
-    ctx.beginPath(); ctx.arc(pxh, pyh, opts.previewR * scale, 0, 2 * Math.PI); ctx.stroke(); ctx.setLineDash([]);
-  }
   // rake bar + heaps
   const bw = W * 0.026, postPx = sim.postR * scale, len = Ri - W * 0.004;
   const toothW = CFG.TOOTH * scale, toothH = bw * 0.55;
@@ -511,11 +588,11 @@ const RING_LEN = 301.6;
 
 let sim, state = 'idle', seed = 0, elapsed = 0, paused = false, lastTs = 0;
 const hold = { active: false, V: 0, pointerId: null, kb: false };
-let settleT = 0, previewR = 0, overlayTimer = null;
+let settleT = 0, overlayTimer = null;
 
 function newGame(s) {
-  seed = s >>> 0; sim = createSim(seed); state = 'idle'; elapsed = 0; settleT = 0; previewR = 0;
-  hold.active = false; hold.V = 0; sim.setPreview(0);
+  seed = s >>> 0; sim = createSim(seed); state = 'idle'; elapsed = 0; settleT = 0;
+  hold.active = false; hold.V = 0;
   clearTimeout(overlayTimer); overlayTimer = null;
   el.startBtn.hidden = false; el.newBtn.hidden = true; el.addBtn.hidden = true; el.status.hidden = true; el.overlay.hidden = true; el.overlay.classList.remove('show');
   el.addBtn.classList.remove('holding');
@@ -543,17 +620,14 @@ function beginHold(pointerId, kb) {
   el.addBtn.classList.add('holding');
   audio.ensure(); audio.resume();
 }
-function releaseHold() {
+// The sand has already landed while holding; ending the hold only decides whether it counted as a pour.
+function endHold() {
   if (!hold.active) return;
-  const V = hold.V; hold.active = false; hold.pointerId = null;
-  el.addBtn.classList.remove('holding'); sim.setPreview(0); previewR = 0; setRing(0);
-  if (V >= 0.02 * HOLD_CAP) { sim.pour(V); el.pours.textContent = String(sim.S.pours); audio.pour(); }
+  const V = hold.V; hold.active = false; hold.pointerId = null; hold.V = 0;
+  el.addBtn.classList.remove('holding'); setRing(0);
+  if (V >= 0.02 * HOLD_CAP) { sim.countPour(); el.pours.textContent = String(sim.S.pours); audio.pour(); }
 }
-function cancelHold() {
-  if (!hold.active) return;
-  hold.active = false; hold.pointerId = null; hold.V = 0;
-  el.addBtn.classList.remove('holding'); sim.setPreview(0); previewR = 0; setRing(0);
-}
+const releaseHold = endHold, cancelHold = endHold;
 
 function finish() {
   const res = scoreFor(sim.S.pours, sim.S.added, sim.S.D);
@@ -581,7 +655,7 @@ function hideOverlay() {
 
 function update(dt) {
   const sdt = dt * SPEED;
-  if (hold.active) { hold.V = Math.min(HOLD_CAP, hold.V + HOLD_RATE * dt); previewR = sim.setPreview(hold.V); setRing(hold.V / HOLD_CAP); }
+  if (hold.active) { hold.V += sim.deposit(Math.min(HOLD_RATE * dt, HOLD_CAP - hold.V)); setRing(hold.V / HOLD_CAP); }
   if (state === 'raking' || state === 'settling' || state === 'complete') sim.step(sdt);
   if (state === 'raking') {
     elapsed += sdt; el.time.textContent = fmtTime(elapsed);
@@ -590,14 +664,14 @@ function update(dt) {
     settleT += dt;
     if (settleT >= 1.2) { sim.snap(); state = 'complete'; el.addBtn.disabled = false; finish(); } // snap moves nothing visible: max dip is below END_DEPTH
   }
-  audio.setFlux(sim.S.flux, state === 'raking');
+  audio.setFlux(sim.S.flux + (hold.active ? 4 : 0), state === 'raking');
 }
 function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
 
 function frame(ts) {
   const dt = lastTs ? Math.min(0.05, (ts - lastTs) / 1000) : 0; lastTs = ts;
   if (!paused && dt > 0) update(dt);
-  render(sim, { settleK: 0, previewR });
+  render(sim, { settleK: 0 });
   if (DEBUG) {
     const S = sim.S, cons = sim.total() - S.initialTotal - S.added;
     el.debug.textContent = `seed ${seed}  speed ${SPEED}x  state ${state}\nD ${S.D.toFixed(1)}  added ${S.added.toFixed(1)}  e ${((S.added - S.D) / S.D).toFixed(3)}\nremaining ${S.remaining.toFixed(2)} (${(S.remaining / S.D * 100).toFixed(2)}%)  carried ${sim.carriedTotal().toFixed(2)}\nconservation ${cons.toExponential(2)}  rotations ${S.rotations.toFixed(2)}  t ${S.t.toFixed(1)}s\nhold ${hold.V.toFixed(0)}  flux ${S.flux.toFixed(2)}`;
@@ -630,7 +704,7 @@ new ResizeObserver(resize).observe(canvas); resize();
 newGame(params.has('seed') ? parseInt(params.get('seed'), 10) >>> 0 : (Math.random() * 2 ** 32) >>> 0);
 try { if (localStorage.getItem('zen-garden-sound') === '1') { el.soundBtn.textContent = 'Sound on'; el.soundBtn.setAttribute('aria-pressed', 'true'); audio.enabled = true; } } catch (e) {}
 requestAnimationFrame(frame);
-window.__debug = { get sim() { return sim; }, get state() { return state; }, start: startGame, pour: v => sim.pour(v), scoreFor, newGame, CFG, render: () => render(sim, { settleK: 0, previewR }), tick: dt => update(dt) };
+window.__debug = { get sim() { return sim; }, get state() { return state; }, start: startGame, pour: v => sim.pour(v), scoreFor, newGame, CFG, render: () => render(sim, { settleK: 0 }), tick: dt => update(dt), deposit: v => sim.deposit(v), relaxAll: n => sim.relaxAll(n || 10), HOLD_RATE, HOLD_CAP };
 </script>
 </body>
 </html>
