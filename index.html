@@ -185,10 +185,11 @@ function createSim(seed) {
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
       const idx = j * N + i; if (!mask[idx]) continue;
       const dx = i + 0.5 - x0, dy = j + 0.5 - y0, d = Math.hypot(dx, dy);
-      const re = shape ? r * shape(Math.atan2(dy, dx)) : r; if (d >= re) continue;
+      const re = shape ? r * shape(Math.atan2(dy, dx)) : r;
+      if (ungroom && d < re + 1.5) groomed[idx] = 0; // clear tracks a little beyond the pile's foot
+      if (d >= re) continue;
       const v = depth * (1 - smoothstep(0, re, d));
       arr[idx] += sign * v; vol += v;
-      if (ungroom) groomed[idx] = 0;
     }
     return vol;
   }
@@ -264,7 +265,7 @@ function createSim(seed) {
   }
   function pour(V) {
     const r = coneRadiusForVolume(V);
-    const actual = addCone(hopper.x, hopper.y, r + 1, CFG.SLOPE * r, +1, h, true);
+    const actual = addCone(hopper.x, hopper.y, r, CFG.SLOPE * r, +1, h, true);
     S.added += actual; S.pours++; S.remaining = deficit();
     return actual;
   }
