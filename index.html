@@ -6,7 +6,7 @@
 <title>Zen Garden</title>
 <style>
 :root{
-  --linen:#F1EAE0; --paper:#F8F3EA; --sand:#E4D5B7; --wet:#B69B72;
+  --linen:#F1EAE0; --paper:#F8F3EA; --sand:#F3F2EF; --wet:#B9B5AE;
   --tray:#2B2622; --tray-hi:#3A332D; --clay:#A8654A; --clay-dark:#8E5239; --moss:#6B7A5A;
   --ink:#2B2622; --muted:#7A6F63; --line:#E2D8C8;
   --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
@@ -329,7 +329,7 @@ const img = octx.createImageData(CFG.N, CFG.N), px = img.data;
 const disp = new Float32Array(CFG.N * CFG.N);
 const heapW = [new Float32Array(CFG.NBINS), new Float32Array(CFG.NBINS)];
 const grain = new Float32Array(CFG.N * CFG.N); { const g = mulberry32(7); for (let k = 0; k < grain.length; k++) grain[k] = 0.965 + g() * 0.07; }
-const SAND = [0xE4, 0xD5, 0xB7], WET = [0xB6, 0x9B, 0x72], GHOST = [0xCD, 0xC0, 0xA9];
+const SAND = [0xF3, 0xF2, 0xEF], WET = [0xB9, 0xB5, 0xAE], GHOST = [0xDC, 0xDA, 0xD5]; // near-white sand, grey in the depths
 const LX = -0.55, LY = -0.7, LZ = 0.55, LN = Math.hypot(LX, LY, LZ), lx = LX / LN, ly = LY / LN, lz = LZ / LN;
 
 function renderHeight(sim, settleK) {
