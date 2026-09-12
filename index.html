@@ -369,14 +369,14 @@ function render(sim, opts) {
   const bw = W * 0.026, postPx = sim.postR * scale, len = Ri - W * 0.004;
   // heaps ahead of the bar (+y side)
   for (let half = 0; half < 2; half++) {
-    const c = sim.carried[half], sgn = half === 0 ? 1 : -1;
-    ctx.beginPath(); ctx.moveTo(sgn * postPx, bw / 2);
+    const c = sim.carried[half], sgn = half === 0 ? 1 : -1, side = sgn; // the -x half leads on its -y side
+    ctx.beginPath(); ctx.moveTo(sgn * postPx, side * bw / 2);
     for (let b = 0; b < CFG.NBINS; b++) {
       const r0 = sim.postR + (b + 0.5) / CFG.NBINS * (sim.R - sim.postR);
       const w = Math.min(14, 1.7 * Math.sqrt(c[b])) * scale;
-      ctx.lineTo(sgn * r0 * scale, bw / 2 + w);
+      ctx.lineTo(sgn * r0 * scale, side * (bw / 2 + w));
     }
-    ctx.lineTo(sgn * len, bw / 2); ctx.closePath();
+    ctx.lineTo(sgn * len, side * bw / 2); ctx.closePath();
     ctx.fillStyle = 'rgba(182,155,114,0.92)'; ctx.fill();
     ctx.strokeStyle = 'rgba(228,213,183,0.55)'; ctx.lineWidth = Math.max(1, W * 0.002); ctx.stroke();
   }
