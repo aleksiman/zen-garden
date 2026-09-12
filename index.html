@@ -20,8 +20,6 @@ h1{font-family:var(--serif);font-weight:400;font-size:30px;letter-spacing:.02em;
 .sub{margin:0 auto;color:var(--muted);font-size:14px;line-height:1.55;max-width:42ch;min-height:2.6em}
 .tray-wrap{position:relative;width:100%;aspect-ratio:1}
 canvas#garden{display:block;width:100%;height:100%;border-radius:50%;box-shadow:0 22px 46px -20px rgba(43,38,34,.5);touch-action:none;user-select:none;-webkit-user-select:none}
-.cue{position:absolute;left:50%;bottom:-8px;transform:translate(-50%,100%);font-size:13px;color:var(--muted);opacity:0;transition:opacity 1.4s;pointer-events:none;white-space:nowrap;font-style:italic;font-family:var(--serif);font-size:15px}
-.cue.show{opacity:1}
 .controls{display:flex;flex-direction:column;align-items:center;gap:16px;width:100%;margin-top:18px}
 button{font:inherit;cursor:pointer;border:0;border-radius:999px;color:var(--ink);background:var(--paper);padding:12px 22px;font-size:15px;transition:background .3s,color .3s,opacity .3s,transform .15s}
 button:focus-visible{outline:2px solid var(--moss);outline-offset:3px}
@@ -31,7 +29,6 @@ button[disabled]{opacity:.45;cursor:default}
 .hold{position:relative;background:var(--clay);color:var(--paper);width:136px;height:136px;border-radius:50%;padding:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:16px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;transition:background .6s,box-shadow 1.6s,transform .15s}
 .hold small{font-size:11px;letter-spacing:.16em;text-transform:uppercase;opacity:.75}
 .hold.holding{background:var(--clay-dark);transform:scale(.97)}
-.hold.glow{box-shadow:0 0 0 10px rgba(168,101,74,.16)}
 .hold svg{position:absolute;inset:-9px;width:calc(100% + 18px);height:calc(100% + 18px);transform:rotate(-90deg);pointer-events:none;overflow:visible}
 .hold svg circle{fill:none;stroke-width:3}
 .hold svg .track{stroke:rgba(43,38,34,.10)}
@@ -62,7 +59,6 @@ button[disabled]{opacity:.45;cursor:default}
   </header>
   <div class="tray-wrap">
     <canvas id="garden" aria-label="Sand garden with a rotating rake"></canvas>
-    <div class="cue" id="cue">The rake carries nothing.</div>
   </div>
   <section class="controls">
     <button class="primary" id="startBtn">Start raking</button>
@@ -109,6 +105,8 @@ const CFG = {
   GROOM_EPS: 0.01,
   END_FRAC: 0.005,
   TOOTH: 4,          // ripple spacing in cells
+  SMOOTH: 0.15,      // how much each pass of the bar evens out the surface it crosses (conservative)
+  BASE_ROLL: 1.2,    // cells of sand the bar always rolls ahead of itself (visual floor)
 };
 const HOLD_RATE = CFG.D_REF / CFG.HOLD_MID_S;
 const HOLD_CAP = HOLD_RATE * CFG.HOLD_CAP_S;
@@ -240,6 +238,9 @@ function createSim(seed) {
         if (f > 0) { h[idx] = v + f; c[b] -= f; S.flux += f; }
         groomed[idx] = (L - h[idx] <= CFG.GROOM_EPS) ? toothed : 0;
       } else groomed[idx] = toothed;
+      // the passing bar nudges sand from high neighbours to low ones: rims slump into holes a little every pass
+      if (mask[idx + 1]) { const f = CFG.SMOOTH * (h[idx + 1] - h[idx]); h[idx] += f; h[idx + 1] -= f; }
+      if (mask[idx + N]) { const f = CFG.SMOOTH * (h[idx + N] - h[idx]); h[idx] += f; h[idx + N] -= f; }
       k++; if (k >= M) k = 0;
     }
   }
@@ -324,7 +325,7 @@ function renderHeight(sim, settleK) {
   const th = sim.S.theta, ct = Math.cos(th), st = Math.sin(th), barHalf = 0.0289 * sim.R, nb = CFG.NBINS, binW = (sim.R - sim.postR) / nb;
   for (let half = 0; half < 2; half++) {
     const hw = heapW[half];
-    for (let b = 0; b < nb; b++) hw[b] = Math.min(14, 1.7 * Math.sqrt(sim.carried[half][b]));
+    for (let b = 0; b < nb; b++) hw[b] = Math.max(CFG.BASE_ROLL, Math.min(14, 1.7 * Math.sqrt(sim.carried[half][b])));
     // smooth across bins so the pushed sand reads as one continuous wave, not per-bin steps
     for (let pass = 0; pass < 8; pass++) {
       let prev = hw[0];
@@ -485,7 +486,7 @@ const audio = {
 
 // ==== Game ===============================================================
 const $ = id => document.getElementById(id);
-const el = { sub: $('sub'), cue: $('cue'), startBtn: $('startBtn'), addBtn: $('addBtn'), ring: $('ring'), status: $('status'), pours: $('pours'), time: $('time'), card: $('card'), score: $('score'), stones: $('stones'), verdict: $('verdict'), breakdown: $('breakdown'), againBtn: $('againBtn'), soundBtn: $('soundBtn'), debug: $('debug') };
+const el = { sub: $('sub'), startBtn: $('startBtn'), addBtn: $('addBtn'), ring: $('ring'), status: $('status'), pours: $('pours'), time: $('time'), card: $('card'), score: $('score'), stones: $('stones'), verdict: $('verdict'), breakdown: $('breakdown'), againBtn: $('againBtn'), soundBtn: $('soundBtn'), debug: $('debug') };
 const params = new URLSearchParams(location.search);
 const SPEED = Math.max(0.1, parseFloat(params.get('speed')) || 1);
 const DEBUG = params.get('debug') === '1';
@@ -493,13 +494,13 @@ const RING_LEN = 301.6;
 
 let sim, state = 'idle', seed = 0, elapsed = 0, paused = false, lastTs = 0;
 const hold = { active: false, V: 0, pointerId: null, kb: false };
-let settleT = 0, previewR = 0, noCarryT = 0, cueShown = false;
+let settleT = 0, previewR = 0;
 
 function newGame(s) {
-  seed = s >>> 0; sim = createSim(seed); state = 'idle'; elapsed = 0; settleT = 0; previewR = 0; noCarryT = 0; cueShown = false;
+  seed = s >>> 0; sim = createSim(seed); state = 'idle'; elapsed = 0; settleT = 0; previewR = 0;
   hold.active = false; hold.V = 0; sim.setPreview(0);
   el.startBtn.hidden = false; el.addBtn.hidden = true; el.status.hidden = true; el.card.hidden = true; el.card.classList.remove('show');
-  el.addBtn.classList.remove('glow', 'holding'); el.cue.classList.remove('show');
+  el.addBtn.classList.remove('holding');
   el.sub.textContent = 'Start the rake. Then add exactly as much sand as the holes need, in one pour.';
   el.pours.textContent = '0'; el.time.textContent = '0:00'; setRing(0);
   if (DEBUG) { el.debug.hidden = false; history.replaceState(null, '', '?' + new URLSearchParams({ ...Object.fromEntries(params), seed }).toString()); }
@@ -516,7 +517,7 @@ function fmtTime(s) { s = Math.floor(s); return Math.floor(s / 60) + ':' + Strin
 function beginHold(pointerId, kb) {
   if (state !== 'raking' || hold.active) return;
   hold.active = true; hold.V = 0; hold.pointerId = pointerId; hold.kb = !!kb;
-  el.addBtn.classList.add('holding'); el.addBtn.classList.remove('glow'); el.cue.classList.remove('show'); cueShown = false; noCarryT = 0;
+  el.addBtn.classList.add('holding');
   audio.ensure(); audio.resume();
 }
 function releaseHold() {
@@ -537,7 +538,7 @@ function finish() {
   el.stones.innerHTML = Array.from({ length: 5 }, (_, i) => `<span class="${i < res.stones ? '' : 'off'}">●</span>`).join('');
   el.verdict.textContent = VERDICTS[res.stones - 1];
   const p = sim.S.pours; el.breakdown.textContent = `${p} pour${p === 1 ? '' : 's'} · ${excessWords(res.e)} · ${fmtTime(elapsed)}`;
-  el.addBtn.hidden = true; el.status.hidden = true; el.cue.classList.remove('show');
+  el.addBtn.hidden = true; el.status.hidden = true;
   el.sub.textContent = 'Every hole is level. The rake keeps turning.';
   el.card.hidden = false; requestAnimationFrame(() => el.card.classList.add('show'));
   audio.chime();
@@ -551,11 +552,6 @@ function update(dt) {
   if (state === 'raking') {
     elapsed += sdt; el.time.textContent = fmtTime(elapsed);
     if (sim.isComplete()) { state = 'settling'; settleT = 0; cancelHold(); el.addBtn.disabled = true; }
-    else {
-      const ct = sim.carriedTotal();
-      if (sim.S.t > CFG.ROT_PERIOD && ct < 0.01 * sim.S.D && !hold.active) noCarryT += sdt; else noCarryT = 0;
-      if (noCarryT > 10 && !cueShown) { cueShown = true; el.cue.classList.add('show'); el.addBtn.classList.add('glow'); }
-    }
   } else if (state === 'settling') {
     settleT += dt;
     if (settleT >= 1) { sim.snap(); state = 'complete'; el.addBtn.disabled = false; finish(); }
