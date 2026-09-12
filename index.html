@@ -586,10 +586,10 @@ const RING_LEN = 301.6;
 
 let sim, state = 'idle', seed = 0, elapsed = 0, paused = false, lastTs = 0;
 const hold = { active: false, V: 0, pointerId: null, kb: false };
-let settleT = 0, overlayTimer = null;
+let settleT = 0, overlayTimer = null, admiring = false; // admiring: result card dismissed, rake keeps turning with sound
 
 function newGame(s) {
-  seed = s >>> 0; sim = createSim(seed); state = 'idle'; elapsed = 0; settleT = 0;
+  seed = s >>> 0; sim = createSim(seed); state = 'idle'; elapsed = 0; settleT = 0; admiring = false;
   hold.active = false; hold.V = 0;
   clearTimeout(overlayTimer); overlayTimer = null;
   el.startBtn.hidden = false; el.newBtn.hidden = true; el.addBtn.hidden = true; el.status.hidden = true; el.overlay.hidden = true; el.overlay.classList.remove('show');
@@ -645,7 +645,7 @@ function showOverlay() {
 }
 function hideOverlay() {
   if (!el.overlay.classList.contains('show')) return;
-  el.overlay.classList.remove('show');
+  el.overlay.classList.remove('show'); admiring = true;
   const done = () => { el.overlay.removeEventListener('transitionend', done); if (state === 'complete' && !el.overlay.classList.contains('show')) { el.overlay.hidden = true; el.newBtn.hidden = false; el.newBtn.focus({ preventScroll: true }); } };
   el.overlay.addEventListener('transitionend', done);
   setTimeout(done, 1400); // fallback if no transitionend arrives
@@ -662,7 +662,7 @@ function update(dt) {
     settleT += dt;
     if (settleT >= 1.2) { sim.snap(); state = 'complete'; el.addBtn.disabled = false; finish(); } // snap moves nothing visible: max dip is below END_DEPTH
   }
-  audio.setSand(sim.S.shave, sim.S.holeFrac, state === 'raking', hold.active);
+  audio.setSand(sim.S.shave, sim.S.holeFrac, state === 'raking' || (state === 'complete' && admiring), hold.active);
 }
 function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
 
