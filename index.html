@@ -237,7 +237,7 @@ function createSim(seed) {
   // --- state -------------------------------------------------------------
   const carried = [new Float64Array(CFG.NBINS), new Float64Array(CFG.NBINS)];
   const tmp = new Float64Array(CFG.NBINS);
-  const S = { theta: 0, t: 0, added: 0, pours: 0, D: 0, initialTotal: 0, remaining: 0, maxBelow: 0, flux: 0, rotations: 0, lastCheck: 0, slides: 0 };
+  const S = { theta: 0, t: 0, added: 0, pours: 0, D: 0, initialTotal: 0, remaining: 0, maxBelow: 0, flux: 0, rotations: 0, lastCheck: 0, slides: 0, shave: 0, holeFrac: 0 };
   S.D = deficit() - excessAbove();
   S.remaining = deficit();
   S.initialTotal = total();
@@ -249,6 +249,7 @@ function createSim(seed) {
 
   function lowerBound(a) { let lo = 0, hi = M; while (lo < hi) { const mid = (lo + hi) >> 1; if (orderAng[mid] < a) lo = mid + 1; else hi = mid; } return lo; }
   const TWO = 2 * Math.PI;
+  let swept = 0, holeCells = 0; // per step, for the sound
   function sweep(a0, da, c, toothed) {
     a0 = ((a0 % TWO) + TWO) % TWO;
     let k = lowerBound(a0); if (k >= M) k = 0;
@@ -256,7 +257,8 @@ function createSim(seed) {
       let rel = orderAng[k] - a0; if (rel < 0) rel += TWO;
       if (rel >= da) break;
       const idx = orderArr[k], b = binOf[idx], v = h[idx];
-      if (v > L) { c[b] += v - L; h[idx] = L; S.flux += v - L; groomed[idx] = toothed; }
+      swept++; if (L - v > 0.08) holeCells++;
+      if (v > L) { c[b] += v - L; h[idx] = L; S.flux += v - L; S.shave += v - L; groomed[idx] = toothed; }
       else if (v < L) {
         const need = L - v, f = c[b] < need ? c[b] : need;
         if (f > 0) { h[idx] = v + f; c[b] -= f; S.flux += f; }
@@ -279,14 +281,14 @@ function createSim(seed) {
     const dth = TWO / CFG.ROT_PERIOD * dt;
     const nsub = Math.max(1, Math.ceil(dth / CFG.MAX_STEP), Math.ceil(CFG.K_DIFF * dt * 60 / 0.4));
     const sdt = dt / nsub, sdth = dth / nsub, k = CFG.K_DIFF * sdt * 60;
-    S.flux = 0;
+    S.flux = 0; S.shave = 0; swept = 0; holeCells = 0;
     for (let s = 0; s < nsub; s++) {
       const a0 = S.theta; S.theta += sdth;
       sweep(a0, sdth, carried[0], 1);
       sweep(a0 + Math.PI, sdth, carried[1], 0);
       diffuse(carried[0], k); diffuse(carried[1], k);
     }
-    S.t += dt; S.rotations = S.theta / TWO; S.flux /= dt;
+    S.t += dt; S.rotations = S.theta / TWO; S.flux /= dt; S.shave /= dt; S.holeFrac = swept ? holeCells / swept : 0;
     relax(dt);
     if (S.t - S.lastCheck >= 0.5) { S.lastCheck = S.t; S.remaining = deficit(); S.maxBelow = maxBelow; }
   }
@@ -522,27 +524,18 @@ function render(sim, opts) {
 
 // ==== Audio ==============================================================
 const audio = {
-  ctx: null, master: null, noiseGain: null, enabled: false,
+  ctx: null, master: null, whiteGain: null, brownGain: null, enabled: false,
   ensure() {
     if (this.ctx) return true;
     try {
       const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return false;
       const c = this.ctx = new AC();
       this.master = c.createGain(); this.master.gain.value = this.enabled ? 1 : 0; this.master.connect(c.destination);
-      // sand hiss
-      const buf = c.createBuffer(1, c.sampleRate * 2, c.sampleRate), data = buf.getChannelData(0);
-      let b0 = 0, b1 = 0; for (let i = 0; i < data.length; i++) { const w = Math.random() * 2 - 1; b0 = 0.99 * b0 + w * 0.05; b1 = 0.96 * b1 + w * 0.15; data[i] = (b0 + b1 + w * 0.3) * 0.6; }
-      const src = c.createBufferSource(); src.buffer = buf; src.loop = true;
-      const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1100; lp.Q.value = 0.4;
-      const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 180;
-      this.noiseGain = c.createGain(); this.noiseGain.gain.value = 0;
-      src.connect(hp); hp.connect(lp); lp.connect(this.noiseGain); this.noiseGain.connect(this.master); src.start();
-      // low pad
-      const padGain = c.createGain(); padGain.gain.value = 0.028; padGain.connect(this.master);
-      const pf = c.createBiquadFilter(); pf.type = 'lowpass'; pf.frequency.value = 420; pf.connect(padGain);
-      const o1 = c.createOscillator(); o1.type = 'sine'; o1.frequency.value = 110; o1.connect(pf); o1.start();
-      const o2 = c.createOscillator(); o2.type = 'triangle'; o2.frequency.value = 164.8; o2.detune.value = 4; const g2 = c.createGain(); g2.gain.value = 0.35; o2.connect(g2); g2.connect(pf); o2.start();
-      const lfo = c.createOscillator(); lfo.frequency.value = 0.07; const lg = c.createGain(); lg.gain.value = 160; lfo.connect(lg); lg.connect(pf.frequency); lfo.start();
+      // sand: white noise for the bar dragging over level sand, brown noise blended in when it ploughs into a pile
+      const n = c.sampleRate * 2, wb = c.createBuffer(1, n, c.sampleRate), bb = c.createBuffer(1, n, c.sampleRate), wd = wb.getChannelData(0), bd = bb.getChannelData(0);
+      let acc = 0; for (let i = 0; i < n; i++) { const w = Math.random() * 2 - 1; wd[i] = w; acc += 0.02 * (w - acc); bd[i] = acc * 3.5; }
+      const ws = c.createBufferSource(); ws.buffer = wb; ws.loop = true; this.whiteGain = c.createGain(); this.whiteGain.gain.value = 0; ws.connect(this.whiteGain); this.whiteGain.connect(this.master); ws.start();
+      const bs = c.createBufferSource(); bs.buffer = bb; bs.loop = true; this.brownGain = c.createGain(); this.brownGain.gain.value = 0; bs.connect(this.brownGain); this.brownGain.connect(this.master); bs.start();
       return true;
     } catch (e) { return false; }
   },
@@ -553,10 +546,14 @@ const audio = {
     if (this.ctx.state === 'suspended') this.ctx.resume();
     this.master.gain.setTargetAtTime(on ? 1 : 0, this.ctx.currentTime, 0.4);
   },
-  setFlux(flux, raking) {
+  // shave: sand per second the bar is scraping off a pile; holeFrac: share of swept cells over a deep hole
+  setSand(shave, holeFrac, raking, pouring) {
     if (!this.ctx || !this.enabled) return;
-    const target = raking ? 0.012 + Math.min(0.26, flux * 0.025) : 0;
-    this.noiseGain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.25);
+    const level = raking ? (0.04 + (pouring ? 0.02 : 0)) * (1 - 0.35 * Math.min(1, holeFrac * 2)) : 0;
+    const brown = Math.min(1, shave / 60);
+    const t = this.ctx.currentTime;
+    this.whiteGain.gain.setTargetAtTime(level * (1 - 0.7 * brown), t, 0.2);
+    this.brownGain.gain.setTargetAtTime(level * brown * 1.6, t, 0.2);
   },
   pour() {
     if (!this.ctx || !this.enabled) return;
@@ -664,7 +661,7 @@ function update(dt) {
     settleT += dt;
     if (settleT >= 1.2) { sim.snap(); state = 'complete'; el.addBtn.disabled = false; finish(); } // snap moves nothing visible: max dip is below END_DEPTH
   }
-  audio.setFlux(sim.S.flux + (hold.active ? 4 : 0), state === 'raking');
+  audio.setSand(sim.S.shave, sim.S.holeFrac, state === 'raking', hold.active);
 }
 function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
 
