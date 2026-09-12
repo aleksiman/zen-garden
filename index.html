@@ -251,9 +251,10 @@ function createSim(seed) {
         if (f > 0) { h[idx] = v + f; c[b] -= f; S.flux += f; }
         groomed[idx] = (L - h[idx] <= CFG.GROOM_EPS) ? toothed : 0;
       } else groomed[idx] = toothed;
-      // the passing bar nudges sand from high neighbours to low ones: rims slump into holes a little every pass
-      if (mask[idx + 1]) { const f = CFG.SMOOTH * (h[idx + 1] - h[idx]); h[idx] += f; h[idx + 1] -= f; }
-      if (mask[idx + N]) { const f = CFG.SMOOTH * (h[idx + N] - h[idx]); h[idx] += f; h[idx + N] -= f; }
+      // the passing bar nudges sand from high neighbours to low ones: rims slump into holes a little every pass.
+      // Only between cells at or below level, so nothing is pulled back out of an unshaved pile ahead of the bar.
+      if (mask[idx + 1] && h[idx + 1] <= L) { const f = CFG.SMOOTH * (h[idx + 1] - h[idx]); h[idx] += f; h[idx + 1] -= f; }
+      if (mask[idx + N] && h[idx + N] <= L) { const f = CFG.SMOOTH * (h[idx + N] - h[idx]); h[idx] += f; h[idx + N] -= f; }
       k++; if (k >= M) k = 0;
     }
   }
